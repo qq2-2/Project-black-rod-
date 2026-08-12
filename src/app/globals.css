@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: #09090C;
+    color: #E4E6EB;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: rgba(201, 168, 76, 0.25);
+    color: #F5EFD8;
+  }
+
+  :focus-visible {
+    outline: 2px solid #C9A84C;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Tabular numerals for all monospace text */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Minimal scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #09090C; }
+  ::-webkit-scrollbar-thumb { background: #252830; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #303540; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Skeleton loading shimmer */
+  .skeleton {
+    border-radius: 6px;
+    background: linear-gradient(
+      90deg,
+      #1A1D25 0%,
+      #22262F 50%,
+      #1A1D25 100%
+    );
+    background-size: 600px 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* Gold gradient — used for the top accent stripe and confidence bar */
+  .gold-bar {
+    background: linear-gradient(90deg, #7A6128 0%, #C9A84C 35%, #E5C96A 50%, #C9A84C 65%, #7A6128 100%);
+  }
+
+  /* Panel card — consistent border + surface */
+  .panel {
+    background-color: #13151B;
+    border: 1px solid #23262F;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid #23262F;
+  }
+  }

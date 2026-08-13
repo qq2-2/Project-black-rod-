@@ -52,7 +52,6 @@ export default function PriceHeader() {
   return (
     <div className="panel">
       <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
-
         <div>
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
@@ -72,7 +71,9 @@ export default function PriceHeader() {
               })}
             </span>
 
-            <div className={\`flex items-baseline gap-1.5 font-mono text-sm font-semibold tabular-nums ${changeColor}\`}>
+            <div
+              className={`flex items-baseline gap-1.5 font-mono text-sm font-semibold tabular-nums ${changeColor}`}
+            >
               <span>
                 {sign}
                 {change.toFixed(2)}
@@ -91,7 +92,6 @@ export default function PriceHeader() {
           <Stat label="52W High" value={weekHigh} />
           <Stat label="52W Low" value={weekLow} />
         </div>
-
       </div>
 
       <div className="flex items-center justify-between border-t border-[#23262F] px-4 py-2 sm:px-6">
@@ -119,4 +119,4 @@ function Stat({ label, value }: { label: string; value: number }) {
       </p>
     </div>
   );
-         }      
+    }

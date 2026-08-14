@@ -6,8 +6,18 @@ export async function GET() {
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Missing GEMINI_API_KEY" },
-        { status: 500 }
+        {
+          verdict: "neutral",
+          confidence: 50,
+          headline: "AI unavailable",
+          reasoning: "The Gemini API key is missing. Showing a neutral fallback.",
+          keyLevels: [
+            { label: "Support", price: 4300, type: "support" },
+            { label: "Resistance", price: 4380, type: "resistance" },
+          ],
+          generatedAt: new Date().toISOString(),
+        },
+        { status: 200 }
       );
     }
 
@@ -31,7 +41,7 @@ Keep the analysis concise and professional.
 `;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: {
@@ -49,32 +59,49 @@ Keep the analysis concise and professional.
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error("Gemini API error:", errorText);
+
       return NextResponse.json(
-        { error: "Gemini API request failed", details: errorText },
-        { status: 500 }
+        {
+          verdict: "neutral",
+          confidence: 55,
+          headline: "Analysis service unavailable",
+          reasoning:
+            "The AI analysis service could not be reached. Displaying a neutral market outlook.",
+          keyLevels: [
+            { label: "Support", price: 4300, type: "support" },
+            { label: "Resistance", price: 4380, type: "resistance" },
+          ],
+          generatedAt: new Date().toISOString(),
+        },
+        { status: 200 }
       );
     }
 
     const data = await response.json();
 
-    const text = data.candidates?.[0]?.content?.parts
-      ?.map((part: any) => part.text || "")
-      .join("")
-      .trim();
+    const text =
+      data.candidates?.[0]?.content?.parts
+        ?.map((part: any) => part.text || "")
+        .join("")
+        .trim() || "";
 
     if (!text) {
-      return NextResponse.json({
-        verdict: "neutral",
-        confidence: 60,
-        headline: "AI analysis temporarily unavailable",
-        reasoning:
-          "The AI service did not return a usable analysis. Using a neutral fallback.",
-        keyLevels: [
-          { label: "Support", price: 4300, type: "support" },
-          { label: "Resistance", price: 4380, type: "resistance" },
-        ],
-        generatedAt: new Date().toISOString(),
-      });
+      return NextResponse.json(
+        {
+          verdict: "neutral",
+          confidence: 60,
+          headline: "AI analysis temporarily unavailable",
+          reasoning:
+            "The AI service did not return a usable analysis. Using a neutral fallback.",
+          keyLevels: [
+            { label: "Support", price: 4300, type: "support" },
+            { label: "Resistance", price: 4380, type: "resistance" },
+          ],
+          generatedAt: new Date().toISOString(),
+        },
+        { status: 200 }
+      );
     }
 
     const cleaned = text
@@ -83,8 +110,28 @@ Keep the analysis concise and professional.
       .replace(/\s*```$/i, "")
       .trim();
 
-    return NextResponse.json(JSON.parse(cleaned));
+    try {
+      return NextResponse.json(JSON.parse(cleaned));
+    } catch {
+      return NextResponse.json(
+        {
+          verdict: "neutral",
+          confidence: 58,
+          headline: "AI response could not be parsed",
+          reasoning:
+            "The AI returned an unexpected format. Using a neutral fallback response.",
+          keyLevels: [
+            { label: "Support", price: 4300, type: "support" },
+            { label: "Resistance", price: 4380, type: "resistance" },
+          ],
+          generatedAt: new Date().toISOString(),
+        },
+        { status: 200 }
+      );
+    }
   } catch (error) {
+    console.error("Analyze route error:", error);
+
     return NextResponse.json(
       {
         verdict: "neutral",
@@ -101,4 +148,4 @@ Keep the analysis concise and professional.
       { status: 200 }
     );
   }
-        }
+            }

@@ -14,19 +14,20 @@ export async function GET() {
     const prompt = `
 You are an institutional XAU/USD market analyst.
 
-Return ONLY valid JSON with this structure:
+Return ONLY valid JSON with this exact structure:
 {
   "verdict": "bullish" | "bearish" | "neutral",
-  "confidence": number,
-  "headline": string,
-  "reasoning": string,
+  "confidence": 75,
+  "headline": "Short market headline",
+  "reasoning": "2-3 sentence analysis",
   "keyLevels": [
-    { "label": string, "price": number, "type": "support" | "resistance" }
+    { "label": "Support", "price": 4300, "type": "support" },
+    { "label": "Resistance", "price": 4380, "type": "resistance" }
   ],
-  "generatedAt": string
+  "generatedAt": "ISO timestamp"
 }
 
-Provide a short professional analysis of the XAU/USD gold market.
+Keep the analysis concise and professional.
 `;
 
     const response = await fetch(
@@ -46,22 +47,58 @@ Provide a short professional analysis of the XAU/USD gold market.
       }
     );
 
+    if (!response.ok) {
+      const errorText = await response.text();
+      return NextResponse.json(
+        { error: "Gemini API request failed", details: errorText },
+        { status: 500 }
+      );
+    }
+
     const data = await response.json();
 
-    const text =
-      data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const text = data.candidates?.[0]?.content?.parts
+      ?.map((part: any) => part.text || "")
+      .join("")
+      .trim();
+
+    if (!text) {
+      return NextResponse.json({
+        verdict: "neutral",
+        confidence: 60,
+        headline: "AI analysis temporarily unavailable",
+        reasoning:
+          "The AI service did not return a usable analysis. Using a neutral fallback.",
+        keyLevels: [
+          { label: "Support", price: 4300, type: "support" },
+          { label: "Resistance", price: 4380, type: "resistance" },
+        ],
+        generatedAt: new Date().toISOString(),
+      });
+    }
 
     const cleaned = text
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
       .trim();
 
     return NextResponse.json(JSON.parse(cleaned));
   } catch (error) {
     return NextResponse.json(
-      { error: "Failed to generate AI analysis" },
-      { status: 500 }
+      {
+        verdict: "neutral",
+        confidence: 50,
+        headline: "Analysis unavailable",
+        reasoning:
+          "An error occurred while generating AI analysis. Showing a neutral fallback.",
+        keyLevels: [
+          { label: "Support", price: 4300, type: "support" },
+          { label: "Resistance", price: 4380, type: "resistance" },
+        ],
+        generatedAt: new Date().toISOString(),
+      },
+      { status: 200 }
     );
   }
-  }
-  
+        }

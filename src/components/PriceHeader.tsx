@@ -44,7 +44,17 @@ export default function PriceHeader() {
     return <div className="panel p-6 text-[#8891A0]">Loading price...</div>;
   }
 
-  const { price, change, changePct, dayHigh, dayLow, weekHigh, weekLow, spread } = data;
+  const {
+    price,
+    change,
+    changePct,
+    dayHigh,
+    dayLow,
+    weekHigh,
+    weekLow,
+    spread,
+  } = data;
+
   const isUp = change >= 0;
   const changeColor = isUp ? "text-[#30B87A]" : "text-[#E04D53]";
   const sign = isUp ? "+" : "";
@@ -58,6 +68,7 @@ export default function PriceHeader() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#30B87A] opacity-50" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[#30B87A]" />
             </span>
+
             <span className="text-[11px] font-semibold uppercase tracking-widest text-[#555B6B]">
               Gold Spot · XAU/USD · Live
             </span>
@@ -72,12 +83,16 @@ export default function PriceHeader() {
             </span>
 
             <div
-              className={`flex items-baseline gap-1.5 font-mono text-sm font-semibold tabular-nums ${changeColor}`}
+              className={
+                "flex items-baseline gap-1.5 font-mono text-sm font-semibold tabular-nums " +
+                changeColor
+              }
             >
               <span>
                 {sign}
                 {change.toFixed(2)}
               </span>
+
               <span className="text-xs opacity-80">
                 ({sign}
                 {changePct.toFixed(2)}%)
@@ -98,6 +113,7 @@ export default function PriceHeader() {
         <span className="font-mono text-[11px] text-[#555B6B]">
           Spread: <span className="text-[#8891A0]">{spread}</span>
         </span>
+
         <span className="font-mono text-[11px] text-[#555B6B]">
           Unit: <span className="text-[#8891A0]">Troy oz · USD</span>
         </span>
@@ -112,6 +128,7 @@ function Stat({ label, value }: { label: string; value: number }) {
       <p className="text-[10px] font-semibold uppercase tracking-widest text-[#555B6B]">
         {label}
       </p>
+
       <p className="font-mono text-[13px] font-semibold tabular-nums text-[#8891A0]">
         ${value.toLocaleString("en-US", {
           minimumFractionDigits: 2,
@@ -119,4 +136,4 @@ function Stat({ label, value }: { label: string; value: number }) {
       </p>
     </div>
   );
-    }
+          }

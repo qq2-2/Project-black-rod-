@@ -10,7 +10,8 @@ export async function GET() {
           verdict: "neutral",
           confidence: 50,
           headline: "AI unavailable",
-          reasoning: "The Gemini API key is missing. Showing a neutral fallback.",
+          reasoning:
+            "The Gemini API key is missing. Showing a neutral fallback.",
           keyLevels: [
             { label: "Support", price: 4300, type: "support" },
             { label: "Resistance", price: 4380, type: "resistance" },
@@ -27,21 +28,20 @@ You are an institutional XAU/USD market analyst.
 Return ONLY valid JSON with this exact structure:
 {
   "verdict": "bullish" | "bearish" | "neutral",
-  "confidence": 75,
-  "headline": "Short market headline",
-  "reasoning": "2-3 sentence analysis",
+  "confidence": number,
+  "headline": string,
+  "reasoning": string,
   "keyLevels": [
-    { "label": "Support", "price": 4300, "type": "support" },
-    { "label": "Resistance", "price": 4380, "type": "resistance" }
+    { "label": string, "price": number, "type": "support" | "resistance" }
   ],
-  "generatedAt": "ISO timestamp"
+  "generatedAt": string
 }
 
 Keep the analysis concise and professional.
 `;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: {
@@ -111,8 +111,22 @@ Keep the analysis concise and professional.
       .trim();
 
     try {
-      return NextResponse.json(JSON.parse(cleaned));
-    } catch {
+      const parsed = JSON.parse(cleaned);
+
+      return NextResponse.json({
+        verdict: parsed.verdict || "neutral",
+        confidence: parsed.confidence || 60,
+        headline: parsed.headline || "XAU/USD market update",
+        reasoning: parsed.reasoning || "Market conditions remain mixed.",
+        keyLevels: parsed.keyLevels || [
+          { label: "Support", price: 4300, type: "support" },
+          { label: "Resistance", price: 4380, type: "resistance" },
+        ],
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+
       return NextResponse.json(
         {
           verdict: "neutral",
@@ -148,4 +162,4 @@ Keep the analysis concise and professional.
       { status: 200 }
     );
   }
-            }
+              }

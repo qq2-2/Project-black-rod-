@@ -3,7 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const VALID_INTERVALS = ["5min", "15min", "1h"] as const;
+const VALID_INTERVALS = [
+  "5min",
+  "15min",
+  "1h",
+  "4h",
+  "1day",
+] as const;
 
 type Interval = (typeof VALID_INTERVALS)[number];
 
@@ -23,25 +29,29 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
 
     const intervalParam = searchParams.get("interval") || "5min";
-    const outputsizeParam = searchParams.get("outputsize") || "500";
+    const outputsizeParam =
+      searchParams.get("outputsize") || "500";
 
-    if (
-      !VALID_INTERVALS.includes(
-        intervalParam as Interval
-      )
-    ) {
+    if (!VALID_INTERVALS.includes(intervalParam as Interval)) {
       return NextResponse.json(
         {
           error:
-            "Invalid interval. Use 5min, 15min, or 1h.",
+            "Invalid interval. Use 5min, 15min, 1h, 4h, or 1day.",
         },
         { status: 400 }
       );
     }
 
+    const parsedOutputsize = Number(outputsizeParam);
+
     const outputsize = Math.min(
       5000,
-      Math.max(1, Number(outputsizeParam) || 500)
+      Math.max(
+        1,
+        Number.isFinite(parsedOutputsize)
+          ? parsedOutputsize
+          : 500
+      )
     );
 
     const url = new URL(
@@ -73,16 +83,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           error: "Failed to fetch XAU/USD candles",
-          details: data?.message || "Unknown Twelve Data error",
+          details:
+            data?.message ||
+            "Unknown Twelve Data error",
         },
-        { status: response.status || 500 }
+        {
+          status: response.status || 500,
+        }
       );
     }
 
     const candles = Array.isArray(data?.values)
       ? data.values
           .map((candle: any) => ({
-            datetime: candle.datetime,
+            datetime: String(candle.datetime),
             open: Number(candle.open),
             high: Number(candle.high),
             low: Number(candle.low),
@@ -100,7 +114,9 @@ export async function GET(request: NextRequest) {
               Number.isFinite(candle.low) &&
               Number.isFinite(candle.close)
           )
-          .reverse()
+          .sort((a: any, b: any) =>
+            a.datetime.localeCompare(b.datetime)
+          )
       : [];
 
     return NextResponse.json(
@@ -114,8 +130,7 @@ export async function GET(request: NextRequest) {
       {
         status: 200,
         headers: {
-          "Cache-Control":
-            "no-store, max-age=0",
+          "Cache-Control": "no-store, max-age=0",
         },
       }
     );
@@ -133,4 +148,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-        }
+      }

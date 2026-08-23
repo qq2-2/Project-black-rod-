@@ -60,10 +60,7 @@ export async function GET(request: NextRequest) {
 
     url.searchParams.set("symbol", "XAU/USD");
     url.searchParams.set("interval", intervalParam);
-    url.searchParams.set(
-      "outputsize",
-      String(outputsize)
-    );
+    url.searchParams.set("outputsize", String(outputsize));
     url.searchParams.set("apikey", apiKey);
     url.searchParams.set("format", "JSON");
     url.searchParams.set("timezone", "UTC");
@@ -75,17 +72,13 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
 
     if (!response.ok || data?.status === "error") {
-      console.error(
-        "Twelve Data candle error:",
-        data
-      );
+      console.error("Twelve Data candle error:", data);
 
       return NextResponse.json(
         {
           error: "Failed to fetch XAU/USD candles",
           details:
-            data?.message ||
-            "Unknown Twelve Data error",
+            data?.message || "Unknown Twelve Data error",
         },
         {
           status: response.status || 500,
@@ -135,10 +128,7 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error) {
-    console.error(
-      "CANDLES ROUTE ERROR:",
-      error
-    );
+    console.error("CANDLES ROUTE ERROR:", error);
 
     return NextResponse.json(
       {

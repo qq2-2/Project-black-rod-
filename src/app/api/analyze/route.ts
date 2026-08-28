@@ -13,15 +13,40 @@ const FALLBACK_ANALYSIS = {
   generatedAt: new Date().toISOString(),
 };
 
+const TIMEFRAMES = [
+  { label: "1D", interval: "1day", outputsize: 300 },
+  { label: "4H", interval: "4h", outputsize: 300 },
+  { label: "1H", interval: "1h", outputsize: 300 },
+  { label: "15M", interval: "15min", outputsize: 300 },
+  { label: "5M", interval: "5min", outputsize: 300 },
+] as const;
+
+type Candle = {
+  datetime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+};
+
+type MarketDataSet = {
+  timeframe: string;
+  interval: string;
+  count: number;
+  candles: Candle[];
+};
+
 export async function GET() {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const twelveDataApiKey = process.env.TWELVE_DATA_API_KEY;
 
     // --------------------------------------------------
-    // 1. Check API key
+    // 1. Check API keys
     // --------------------------------------------------
 
-    if (!apiKey) {
+    if (!geminiApiKey) {
       console.error("GEMINI_API_KEY is missing");
 
       return NextResponse.json(
@@ -40,8 +65,113 @@ export async function GET() {
       );
     }
 
+    if (!twelveDataApiKey) {
+      console.error("TWELVE_DATA_API_KEY is missing");
+
+      return NextResponse.json(
+        {
+          ...FALLBACK_ANALYSIS,
+          headline: "Market data API key missing",
+          reasoning:
+            "TWELVE_DATA_API_KEY is not configured in the Vercel environment variables.",
+        },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      );
+    }
+
     // --------------------------------------------------
-    // 2. Prompt
+    // 2. Fetch XAU/USD market data
+    // --------------------------------------------------
+
+    const marketData: MarketDataSet[] = await Promise.all(
+      TIMEFRAMES.map(async ({ label, interval, outputsize }) => {
+        const url = new URL(
+          "https://api.twelvedata.com/time_series"
+        );
+
+        url.searchParams.set("symbol", "XAU/USD");
+        url.searchParams.set("interval", interval);
+        url.searchParams.set("outputsize", String(outputsize));
+        url.searchParams.set("apikey", twelveDataApiKey);
+        url.searchParams.set("format", "JSON");
+        url.searchParams.set("timezone", "UTC");
+
+        const response = await fetch(url.toString(), {
+          cache: "no-store",
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || data?.status === "error") {
+          throw new Error(
+            `${label} market data request failed: ${
+              data?.message || `HTTP ${response.status}`
+            }`
+          );
+        }
+
+        const candles: Candle[] = Array.isArray(data?.values)
+          ? data.values
+              .map((candle: any) => ({
+                datetime: String(candle?.datetime ?? ""),
+                open: Number(candle?.open),
+                high: Number(candle?.high),
+                low: Number(candle?.low),
+                close: Number(candle?.close),
+                volume:
+                  candle?.volume !== undefined
+                    ? Number(candle.volume)
+                    : null,
+              }))
+              .filter(
+                (candle: Candle) =>
+                  candle.datetime &&
+                  Number.isFinite(candle.open) &&
+                  Number.isFinite(candle.high) &&
+                  Number.isFinite(candle.low) &&
+                  Number.isFinite(candle.close)
+              )
+              .sort((a: Candle, b: Candle) =>
+                a.datetime.localeCompare(b.datetime)
+              )
+          : [];
+
+        if (candles.length === 0) {
+          throw new Error(
+            `No valid ${label} XAU/USD candle data was returned.`
+          );
+        }
+
+        return {
+          timeframe: label,
+          interval,
+          count: candles.length,
+          candles,
+        };
+      })
+    );
+
+    // --------------------------------------------------
+    // 3. Build the market-data message for Gemini
+    // --------------------------------------------------
+
+    const marketDataText = JSON.stringify(
+      {
+        symbol: "XAU/USD",
+        timezone: "UTC",
+        timeframes: marketData,
+      },
+      null,
+      2
+    );
+
+    // --------------------------------------------------
+    // 4. Prompt
     // --------------------------------------------------
 
     const prompt = `
@@ -331,31 +461,46 @@ Then state the exact price/action confirmation that should be observed before en
 `;
 
     // --------------------------------------------------
-    // 3. Gemini API request
+    // 5. Gemini API request
     // --------------------------------------------------
 
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
       {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
+          "x-goog-api-key": geminiApiKey,
         },
+
         body: JSON.stringify({
           contents: [
             {
+              role: "user",
               parts: [
                 {
                   text: prompt,
                 },
+                {
+                  text: `
+Here is the actual XAU/USD market data to analyze.
+
+IMPORTANT:
+This JSON is the source of truth for the analysis.
+Do not invent missing information.
+
+${marketDataText}
+`,
+                },
               ],
             },
           ],
-          generationConfig: {
-            response_mime_type: "application/json",
 
-            response_schema: {
+          generationConfig: {
+            responseMimeType: "application/json",
+
+            responseSchema: {
               type: "OBJECT",
 
               properties: {
@@ -397,7 +542,11 @@ Then state the exact price/action confirmation that should be observed before en
                       },
                     },
 
-                    required: ["label", "price", "type"],
+                    required: [
+                      "label",
+                      "price",
+                      "type",
+                    ],
                   },
                 },
 
@@ -415,13 +564,17 @@ Then state the exact price/action confirmation that should be observed before en
                 "generatedAt",
               ],
             },
+
+            thinkingConfig: {
+              thinkingLevel: "HIGH",
+            },
           },
         }),
       }
     );
 
     // --------------------------------------------------
-    // 4. Handle Gemini errors
+    // 6. Handle Gemini errors
     // --------------------------------------------------
 
     if (!response.ok) {
@@ -449,7 +602,7 @@ Then state the exact price/action confirmation that should be observed before en
     }
 
     // --------------------------------------------------
-    // 5. Parse Gemini response
+    // 7. Parse Gemini response
     // --------------------------------------------------
 
     const data = await response.json();
@@ -480,7 +633,7 @@ Then state the exact price/action confirmation that should be observed before en
     }
 
     // --------------------------------------------------
-    // 6. Parse structured JSON
+    // 8. Parse structured JSON
     // --------------------------------------------------
 
     let parsed: any;
@@ -488,7 +641,10 @@ Then state the exact price/action confirmation that should be observed before en
     try {
       parsed = JSON.parse(text);
     } catch (error) {
-      console.error("Failed to parse Gemini JSON:", text);
+      console.error(
+        "Failed to parse Gemini JSON:",
+        text
+      );
 
       return NextResponse.json(
         {
@@ -507,12 +663,18 @@ Then state the exact price/action confirmation that should be observed before en
     }
 
     // --------------------------------------------------
-    // 7. Validate the response
+    // 9. Validate the response
     // --------------------------------------------------
 
-    const validVerdicts = ["bullish", "bearish", "neutral"];
+    const validVerdicts = [
+      "bullish",
+      "bearish",
+      "neutral",
+    ];
 
-    const verdict = validVerdicts.includes(parsed?.verdict)
+    const verdict = validVerdicts.includes(
+      parsed?.verdict
+    )
       ? parsed.verdict
       : "neutral";
 
@@ -536,14 +698,21 @@ Then state the exact price/action confirmation that should be observed before en
         ? parsed.reasoning
         : "Market conditions remain mixed.";
 
-    const keyLevels = Array.isArray(parsed?.keyLevels)
+    const keyLevels = Array.isArray(
+      parsed?.keyLevels
+    )
       ? parsed.keyLevels
           .filter(
             (level: any) =>
               level &&
               typeof level.label === "string" &&
-              Number.isFinite(Number(level.price)) &&
-              ["support", "resistance"].includes(level.type)
+              Number.isFinite(
+                Number(level.price)
+              ) &&
+              [
+                "support",
+                "resistance",
+              ].includes(level.type)
           )
           .map((level: any) => ({
             label: level.label,
@@ -553,7 +722,7 @@ Then state the exact price/action confirmation that should be observed before en
       : [];
 
     // --------------------------------------------------
-    // 8. Final response
+    // 10. Final response
     // --------------------------------------------------
 
     return NextResponse.json(
@@ -583,7 +752,9 @@ Then state the exact price/action confirmation that should be observed before en
         ...FALLBACK_ANALYSIS,
         headline: "Analysis unavailable",
         reasoning:
-          "An unexpected server error occurred while contacting the Gemini analysis service.",
+          error instanceof Error
+            ? error.message
+            : "An unexpected server error occurred while contacting the market-data or Gemini analysis service.",
       },
       {
         status: 200,
@@ -593,4 +764,4 @@ Then state the exact price/action confirmation that should be observed before en
       }
     );
   }
-          }
+      }

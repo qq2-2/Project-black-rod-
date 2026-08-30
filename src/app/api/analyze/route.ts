@@ -452,6 +452,7 @@ Do not enter in the middle of a move.
 Do not assume an FVG will hold.
 Do not assume liquidity will be taken.
 Do not predict reversals without confirmation.
+also PLEASE GIVE ENTRY POINTS DURING THE SUMMERIZING
 
 Finally answer:
 

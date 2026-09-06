@@ -453,11 +453,11 @@ Do not assume an FVG will hold.
 Do not assume liquidity will be taken.
 Do not predict reversals without confirmation.
 also PLEASE GIVE ENTRY POINTS DURING THE SUMMERIZING
-
+PRIORITIZE THIS BELOW
 Finally answer:
 
 "IF I WERE SITTING IN FRONT OF THIS CHART RIGHT NOW, THE ONE THING I SHOULD WAIT FOR BEFORE ENTERING IS: ______"
-
+please do mot use words like SHORT or LONG, instead use shor buy , short sell , or long buy and long sell , and analysis should give a minimum risk to reward ratio of 1:3.5 anything below this is not acceptable... 
 Then state the exact price/action confirmation that should be observed before entering.
 `;
 

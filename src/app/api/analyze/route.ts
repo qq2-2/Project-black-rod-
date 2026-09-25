@@ -6,6 +6,20 @@ export const revalidate = 0;
 
 const GEMINI_MODEL = "gemini-3.8-flash";
 const MIN_RISK_REWARD = 3.5;
+const TWELVE_DATA_CACHE_SECONDS = 60;
+const ANALYSIS_DEDUPE_MS = 15_000;
+const GEMINI_TIMEOUT_MS = 45_000;
+
+let recentAnalysisCache:
+  | {
+      createdAt: number;
+      value: Record<string, unknown>;
+    }
+  | null = null;
+
+let analysisInFlight:
+  | Promise<Record<string, unknown>>
+  | null = null;
 
 const FALLBACK_ANALYSIS = {
   verdict: "neutral",
@@ -384,15 +398,17 @@ function buildDerivedContext(
   const latestOneDay =
     oneDay?.candles[oneDay.candles.length - 1] ?? null;
 
+  const fiveMinuteData = marketData.find(
+    (dataset) => dataset.timeframe === "5M"
+  );
+
+  const latestFiveMinute =
+    fiveMinuteData?.candles[
+      fiveMinuteData.candles.length - 1
+    ] ?? null;
+
   return {
-    currentPrice:
-      marketData.find(
-        (dataset) => dataset.timeframe === "5M"
-      )?.candles[
-        marketData.find(
-          (dataset) => dataset.timeframe === "5M"
-        )!.candles.length - 1
-      ]?.close ?? null,
+    currentPrice: latestFiveMinute?.close ?? null,
     previousDay: latestOneDay
       ? {
           high: roundPrice(latestOneDay.high),
@@ -408,20 +424,47 @@ function buildMarketDataText(
   marketData: MarketDataSet[],
   derivedContext: ReturnType<typeof buildDerivedContext>
 ) {
-  // Compact JSON keeps the full 5,000-candle dataset useful without
-  // spending tokens on unnecessary indentation.
+  // Keep all requested candles, but use compact OHLC arrays instead of
+  // repeating JSON property names (and omit volume, which is not used
+  // by the analysis rules). This materially reduces Gemini input tokens
+  // without removing market-price information.
+  const timeframes = marketData.map(
+    ({
+      timeframe,
+      interval,
+      count,
+      candles,
+    }) => ({
+      timeframe,
+      interval,
+      count,
+      candleFormat:
+        "[datetime, open, high, low, close]",
+      candles: candles.map(
+        (candle) => [
+          candle.datetime,
+          candle.open,
+          candle.high,
+          candle.low,
+          candle.close,
+        ]
+      ),
+    })
+  );
+
   return JSON.stringify({
     symbol: "XAU/USD",
     timezone: "UTC",
     candleCounts: marketData.reduce(
       (acc, dataset) => {
-        acc[dataset.timeframe] = dataset.count;
+        acc[dataset.timeframe] =
+          dataset.count;
         return acc;
       },
       {} as Record<string, number>
     ),
     derivedContext,
-    timeframes: marketData,
+    timeframes,
   });
 }
 
@@ -591,7 +634,7 @@ When confirmed, provide:
 - TP3
 - risk/reward
 - invalidation
-- confidence /10
+- confidence /100
 
 The entry must be actionable and tied to a specific price/action confirmation.
 Do not provide vague entries such as "around support."
@@ -868,7 +911,14 @@ function enforceRiskReward(
     tradePlan.tp1 - tradePlan.entry
   );
 
-  if (risk <= 0 || reward <= 0) {
+  const validGeometry =
+    action === "LONG BUY"
+      ? tradePlan.stopLoss < tradePlan.entry &&
+        tradePlan.tp1 > tradePlan.entry
+      : tradePlan.stopLoss > tradePlan.entry &&
+        tradePlan.tp1 < tradePlan.entry;
+
+  if (risk <= 0 || reward <= 0 || !validGeometry) {
     return {
       ...tradePlan,
       bestAction: "NO TRADE",
@@ -975,12 +1025,19 @@ export async function GET() {
 
             const response = await fetch(
               url.toString(),
-                {
-                    next: {
-                         revalidate: 60,
-                        },
-                    }
-                );
+              {
+                next: {
+                  revalidate:
+                    TWELVE_DATA_CACHE_SECONDS,
+                  tags: [
+                    `xauusd-${label}`,
+                  ],
+                },
+                signal: AbortSignal.timeout(
+                  20_000
+                ),
+              }
+            );
 
             const data = await response.json();
 
@@ -1075,225 +1132,245 @@ export async function GET() {
         derivedContext
       );
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": geminiApiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [
-              {
-                text: ANALYSIS_PROMPT,
-              },
-            ],
+    const generateAnalysis = async (): Promise<
+      Record<string, unknown>
+    > => {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+        {
+          method: "POST",
+          cache: "no-store",
+          signal: AbortSignal.timeout(
+            GEMINI_TIMEOUT_MS
+          ),
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiApiKey,
           },
-          contents: [
-            {
-              role: "user",
+          body: JSON.stringify({
+            systemInstruction: {
               parts: [
                 {
-                  text: `Analyze this XAU/USD market dataset. The JSON contains 1D, 4H, 1H, 15M and 5M candles plus objective derived context.
+                  text: ANALYSIS_PROMPT,
+                },
+              ],
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: `Analyze this XAU/USD market dataset. The JSON contains 1D, 4H, 1H, 15M and 5M candles plus objective derived context.
 
 IMPORTANT:
 - The JSON is the source of truth.
 - Use the full supplied candle history where relevant.
+- Candle rows are [datetime, open, high, low, close].
 - Do not invent missing data.
 - The 5M is execution only.
 - Minimum acceptable R:R for an executable trade is 1:3.5.
 
 MARKET DATA:
 ${marketDataText}`,
-                },
-              ],
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseMimeType:
+                "application/json",
+              responseSchema: RESPONSE_SCHEMA,
+              thinkingConfig: {
+                thinkingLevel: "medium",
+              },
             },
-          ],
-          generationConfig: {
-            responseMimeType:
-              "application/json",
-            responseSchema: RESPONSE_SCHEMA,
-            thinkingConfig: {
-              thinkingLevel: "high",
-            },
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText =
-        await response.text();
-
-      console.error(
-        "================================="
-      );
-      console.error(
-        "GEMINI API ERROR"
-      );
-      console.error(
-        "Model:",
-        GEMINI_MODEL
-      );
-      console.error(
-        "Status:",
-        response.status
-      );
-      console.error(
-        "Response:",
-        errorText
-      );
-      console.error(
-        "================================="
+          }),
+        }
       );
 
-      return NextResponse.json(
-        {
+      if (!response.ok) {
+        const errorText =
+          await response.text();
+
+        console.error(
+          "================================="
+        );
+        console.error(
+          "GEMINI API ERROR"
+        );
+        console.error(
+          "Model:",
+          GEMINI_MODEL
+        );
+        console.error(
+          "Status:",
+          response.status
+        );
+        console.error(
+          "Response:",
+          errorText
+        );
+        console.error(
+          "================================="
+        );
+
+        let geminiMessage =
+          `Gemini returned HTTP ${response.status}.`;
+        let geminiStatus =
+          `HTTP_${response.status}`;
+
+        try {
+          const errorJson =
+            JSON.parse(errorText);
+
+          geminiMessage =
+            errorJson?.error?.message ||
+            geminiMessage;
+
+          geminiStatus =
+            errorJson?.error?.status ||
+            errorJson?.error?.code ||
+            geminiStatus;
+        } catch {
+          if (errorText) {
+            geminiMessage =
+              errorText.slice(0, 1000);
+          }
+        }
+
+        return {
           ...FALLBACK_ANALYSIS,
           headline:
             "Gemini API request failed",
-          reasoning: `Gemini returned HTTP ${response.status}. Check the Vercel deployment logs for the exact API error.`,
-        },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control":
-              "no-store, max-age=0",
-          },
-        }
-      );
-    }
+          reasoning:
+            `${geminiStatus}: ${geminiMessage}`,
+          generatedAt:
+            new Date().toISOString(),
+        };
+      }
 
-    const data =
-      await response.json();
+      const data =
+        await response.json();
 
-    const text =
-      data?.candidates?.[0]?.content?.parts
-        ?.map(
-          (part: {
-            text?: string;
-          }) => part?.text || ""
-        )
-        .join("")
-        .trim() || "";
+      const responseText =
+        data?.candidates?.[0]?.content?.parts
+          ?.map(
+            (part: {
+              text?: string;
+            }) => part?.text || ""
+          )
+          .join("")
+          .trim() || "";
 
-    if (!text) {
-      console.error(
-        "Gemini returned no text:",
-        data
-      );
+      if (!responseText) {
+        console.error(
+          "Gemini returned no text:",
+          data
+        );
 
-      return NextResponse.json(
-        {
+        return {
           ...FALLBACK_ANALYSIS,
           headline:
             "Gemini returned no analysis",
           reasoning:
             "Gemini responded successfully, but no usable analysis was returned.",
-        },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control":
-              "no-store, max-age=0",
-          },
-        }
-      );
-    }
+          generatedAt:
+            new Date().toISOString(),
+        };
+      }
 
-    let parsed: any;
+      let parsed: any;
 
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      console.error(
-        "Failed to parse Gemini JSON:",
-        text
-      );
+      try {
+        parsed = JSON.parse(
+          responseText
+        );
+      } catch {
+        console.error(
+          "Failed to parse Gemini JSON:",
+          responseText
+        );
 
-      return NextResponse.json(
-        {
+        return {
           ...FALLBACK_ANALYSIS,
           headline:
             "Invalid Gemini response",
           reasoning:
             "Gemini returned a response that could not be converted into the required analysis format.",
-        },
-        {
-          status: 200,
-          headers: {
-            "Cache-Control":
-              "no-store, max-age=0",
-          },
-        }
-      );
-    }
+          generatedAt:
+            new Date().toISOString(),
+        };
+      }
 
-    const validVerdicts = [
-      "bullish",
-      "bearish",
-      "neutral",
-    ];
+      const validVerdicts = [
+        "bullish",
+        "bearish",
+        "neutral",
+      ];
 
-    const verdict =
-      validVerdicts.includes(
-        parsed?.verdict
-      )
-        ? parsed.verdict
-        : "neutral";
-
-    const confidence = Math.min(
-      100,
-      Math.max(
-        0,
-        Number.isFinite(
-          Number(parsed?.confidence)
+      const verdict =
+        validVerdicts.includes(
+          parsed?.verdict
         )
-          ? Number(parsed.confidence)
-          : 50
-      )
-    );
+          ? parsed.verdict
+          : "neutral";
 
-    const headline =
-      typeof parsed?.headline ===
-      "string"
-        ? parsed.headline
-        : "XAU/USD market analysis";
-
-    const reasoning =
-      typeof parsed?.reasoning ===
-      "string"
-        ? parsed.reasoning
-        : "Market conditions remain mixed.";
-
-    const keyLevels =
-      sanitizeKeyLevels(
-        parsed?.keyLevels
+      const rawConfidence = Number(
+        parsed?.confidence
       );
 
-    const sanitizedTradePlan =
-      sanitizeTradePlan(
-        parsed?.tradePlan
+      const normalizedConfidence =
+        Number.isFinite(rawConfidence)
+          ? rawConfidence <= 10
+            ? rawConfidence * 10
+            : rawConfidence
+          : 50;
+
+      const confidence = Math.min(
+        100,
+        Math.max(
+          0,
+          normalizedConfidence
+        )
       );
 
-    const tradePlan =
-      enforceRiskReward(
-        sanitizedTradePlan
-      );
+      const headline =
+        typeof parsed?.headline ===
+        "string"
+          ? parsed.headline
+          : "XAU/USD market analysis";
 
-    const finalVerdict =
-      tradePlan.bestAction ===
-        "LONG BUY"
-        ? "bullish"
-        : tradePlan.bestAction ===
-          "SHORT SELL"
-        ? "bearish"
-        : verdict;
+      const reasoning =
+        typeof parsed?.reasoning ===
+        "string"
+          ? parsed.reasoning
+          : "Market conditions remain mixed.";
 
-    return NextResponse.json(
-      {
+      const keyLevels =
+        sanitizeKeyLevels(
+          parsed?.keyLevels
+        );
+
+      const sanitizedTradePlan =
+        sanitizeTradePlan(
+          parsed?.tradePlan
+        );
+
+      const tradePlan =
+        enforceRiskReward(
+          sanitizedTradePlan
+        );
+
+      const finalVerdict =
+        tradePlan.bestAction ===
+          "LONG BUY"
+          ? "bullish"
+          : tradePlan.bestAction ===
+            "SHORT SELL"
+          ? "bearish"
+          : verdict;
+
+      return {
         verdict: finalVerdict,
         confidence,
         headline,
@@ -1325,7 +1402,48 @@ ${marketDataText}`,
           currentPrice:
             derivedContext.currentPrice,
         },
-      },
+      };
+    };
+
+    const now = Date.now();
+
+    if (
+      recentAnalysisCache &&
+      now -
+        recentAnalysisCache.createdAt <
+        ANALYSIS_DEDUPE_MS
+    ) {
+      return NextResponse.json(
+        recentAnalysisCache.value,
+        {
+          status: 200,
+          headers: {
+            "Cache-Control":
+              "no-store, max-age=0",
+          },
+        }
+      );
+    }
+
+    if (!analysisInFlight) {
+      analysisInFlight =
+        generateAnalysis().finally(
+          () => {
+            analysisInFlight = null;
+          }
+        );
+    }
+
+    const result =
+      await analysisInFlight;
+
+    recentAnalysisCache = {
+      createdAt: Date.now(),
+      value: result,
+    };
+
+    return NextResponse.json(
+      result,
       {
         status: 200,
         headers: {
@@ -1334,6 +1452,7 @@ ${marketDataText}`,
         },
       }
     );
+
   } catch (error) {
     console.error(
       "================================="
@@ -1353,7 +1472,9 @@ ${marketDataText}`,
           "Analysis unavailable",
         reasoning:
           error instanceof Error
-            ? error.message
+            ? error.name === "TimeoutError"
+              ? "The external market-data or Gemini request timed out. Please retry after a short wait."
+              : error.message
             : "An unexpected server error occurred while contacting the market-data or Gemini analysis service.",
       },
       {

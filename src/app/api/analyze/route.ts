@@ -975,10 +975,12 @@ export async function GET() {
 
             const response = await fetch(
               url.toString(),
-              {
-                cache: "no-store",
-              }
-            );
+                {
+                    next: {
+                         revalidate: 60,
+                        },
+                    }
+                );
 
             const data = await response.json();
 

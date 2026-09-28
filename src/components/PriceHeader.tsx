@@ -28,8 +28,8 @@ export default function PriceHeader() {
           changePct: Number(json.percent_change || 0),
           dayHigh: Number(json.high || 0),
           dayLow: Number(json.low || 0),
-          weekHigh: Number(json.high || 0),
-          weekLow: Number(json.low || 0),
+          weekHigh: Number(json.fifty_two_week?.high || 0),
+          weekLow: Number(json.fifty_two_week?.low || 0),
           spread: "0.00",
         });
       } catch (error) {

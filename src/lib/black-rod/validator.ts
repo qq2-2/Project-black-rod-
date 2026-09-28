@@ -2,12 +2,18 @@ import {
   StructureAnalysis,
   StructureEvent,
 } from "./structure";
-import { LiquidityAnalysis, LiquidityLevel } from "./liquidity";
+import {
+  LiquidityAnalysis,
+  LiquidityLevel,
+} from "./liquidity";
 import {
   DisplacementAnalysis,
   DisplacementEvent,
 } from "./displacement";
-import { FVGAnalysis, FVGZone } from "./fvg";
+import {
+  FVGAnalysis,
+  FVGZone,
+} from "./fvg";
 import {
   OrderBlockAnalysis,
   OrderBlock,
@@ -24,7 +30,10 @@ export type ValidatorAction =
   | "SHORT SELL"
   | "NO VALID ENTRY YET — WAIT.";
 
-export type ValidatorDirection = "BULLISH" | "BEARISH" | "NEUTRAL";
+export type ValidatorDirection =
+  | "BULLISH"
+  | "BEARISH"
+  | "NEUTRAL";
 
 export type ConfirmationStatus =
   | "CONFIRMED"
@@ -97,103 +106,77 @@ function mergeOptions(
 }
 
 function finite(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  );
 }
 
-function last<T>(items: T[] | undefined): T | null {
-  return items && items.length ? items[items.length - 1] : null;
+function last<T>(
+  items: T[] | undefined
+): T | null {
+  return items && items.length
+    ? items[items.length - 1]
+    : null;
 }
 
 function getLatestEvent(
   analysis: StructureAnalysis
 ): StructureEvent | null {
-  const events = Array.isArray(analysis.events)
-    ? analysis.events
-    : [];
-
-  return (
-    (analysis as StructureAnalysis & {
-      latestEvent?: StructureEvent | null;
-    }).latestEvent ??
-    last(events)
+  return last(
+    Array.isArray(analysis.events)
+      ? analysis.events
+      : []
   );
 }
 
 function getLatestDisplacement(
   analysis: DisplacementAnalysis
 ): DisplacementEvent | null {
-  const extended = analysis as DisplacementAnalysis & {
-    latestDisplacement?: DisplacementEvent | null;
-    latestBullish?: DisplacementEvent | null;
-    latestBearish?: DisplacementEvent | null;
-  };
-
-  if (extended.latestDisplacement) {
-    return extended.latestDisplacement;
-  }
-
-  const events = Array.isArray(analysis.events)
-    ? analysis.events
-    : [];
-
-  return last(events);
+  return analysis.latest ?? last(analysis.events);
 }
 
 function getActiveFVGs(
   analysis: FVGAnalysis
 ): FVGZone[] {
-  const extended = analysis as FVGAnalysis & {
-    activeFVGs?: FVGZone[];
-  };
-
-  if (Array.isArray(extended.activeFVGs)) {
-    return extended.activeFVGs;
-  }
-
-  return Array.isArray(analysis.fvgs)
-    ? analysis.fvgs.filter(
-        (zone) =>
-          zone.status === "ACTIVE" ||
-          zone.status === "PARTIALLY_MITIGATED"
-      )
-    : [];
+  return [
+    ...(analysis.activeBullishFVGs ?? []),
+    ...(analysis.activeBearishFVGs ?? []),
+  ];
 }
 
 function getActiveOrderBlocks(
   analysis: OrderBlockAnalysis
 ): OrderBlock[] {
-  const extended = analysis as OrderBlockAnalysis & {
-    activeOrderBlocks?: OrderBlock[];
-    activeBullishOrderBlocks?: OrderBlock[];
-    activeBearishOrderBlocks?: OrderBlock[];
-  };
-
-  if (Array.isArray(extended.activeOrderBlocks)) {
-    return extended.activeOrderBlocks;
-  }
-
   return [
-    ...(extended.activeBullishOrderBlocks ?? []),
-    ...(extended.activeBearishOrderBlocks ?? []),
-  ].filter(
-    (block, index, array) =>
-      array.findIndex(
-        (candidate) =>
-          candidate.index === block.index &&
-          candidate.type === block.type
-      ) === index
-  );
+    ...(analysis.activeBullishOrderBlocks ?? []),
+    ...(analysis.activeBearishOrderBlocks ?? []),
+  ];
+}
+
+function zoneMidpoint(
+  zone: { high: number; low: number }
+): number {
+  return (zone.high + zone.low) / 2;
 }
 
 function percentDistance(
   price: number,
   level: number
 ): number {
-  if (!finite(price) || !finite(level) || level === 0) {
+  if (
+    !finite(price) ||
+    !finite(level) ||
+    level === 0
+  ) {
     return Infinity;
   }
 
-  return Math.abs(price - level) / Math.abs(level) * 100;
+  return (
+    (Math.abs(price - level) /
+      Math.abs(level)) *
+    100
+  );
 }
 
 function isNearPrice(
@@ -201,7 +184,21 @@ function isNearPrice(
   level: number,
   tolerancePercent: number
 ): boolean {
-  return percentDistance(price, level) <= tolerancePercent;
+  return (
+    percentDistance(
+      price,
+      level
+    ) <= tolerancePercent
+  );
+}
+
+function getAllLiquidityLevels(
+  liquidity: LiquidityAnalysis
+): LiquidityLevel[] {
+  return [
+    ...(liquidity.buySide ?? []),
+    ...(liquidity.sellSide ?? []),
+  ];
 }
 
 function getNearestLiquidity(
@@ -209,28 +206,36 @@ function getNearestLiquidity(
   currentPrice: number,
   direction: "ABOVE" | "BELOW"
 ): LiquidityLevel | null {
-  const candidates = levels.filter((level) =>
-    direction === "ABOVE"
-      ? level.price > currentPrice
-      : level.price < currentPrice
+  const candidates = levels.filter(
+    (level) =>
+      direction === "ABOVE"
+        ? level.price > currentPrice
+        : level.price < currentPrice
   );
 
   if (!candidates.length) {
     return null;
   }
 
-  return candidates.reduce((nearest, level) => {
-    const nearestDistance = Math.abs(
-      nearest.price - currentPrice
-    );
-    const levelDistance = Math.abs(
-      level.price - currentPrice
-    );
+  return candidates.reduce(
+    (nearest, level) => {
+      const nearestDistance =
+        Math.abs(
+          nearest.price -
+            currentPrice
+        );
+      const levelDistance =
+        Math.abs(
+          level.price -
+            currentPrice
+        );
 
-    return levelDistance < nearestDistance
-      ? level
-      : nearest;
-  });
+      return levelDistance <
+        nearestDistance
+        ? level
+        : nearest;
+    }
+  );
 }
 
 function detectLiquiditySweep(
@@ -242,65 +247,16 @@ function detectLiquiditySweep(
   reason: string;
   level: LiquidityLevel | null;
 } {
-  const levels = Array.isArray(liquidity.levels)
-    ? liquidity.levels
-    : [];
-
-  const recentlySwept = (
-    liquidity as LiquidityAnalysis & {
-      sweptLevels?: LiquidityLevel[];
-      sweeps?: Array<{
-        type?: "BSL" | "SSL";
-        price?: number;
-        direction?: "BULLISH" | "BEARISH";
-      }>;
-    }
-  ).sweeps;
-
-  if (Array.isArray(recentlySwept) && recentlySwept.length) {
-    const latest = last(recentlySwept);
-
-    if (latest?.direction === "BULLISH") {
-      return {
-        bullish: true,
-        bearish: false,
-        reason: "Recent bullish liquidity sweep is present.",
-        level:
-          finite(latest.price)
-            ? levels.find(
-                (level) =>
-                  Math.abs(level.price - latest.price!) <
-                  Math.abs(level.price) * 0.001
-              ) ?? null
-            : null,
-      };
-    }
-
-    if (latest?.direction === "BEARISH") {
-      return {
-        bullish: false,
-        bearish: true,
-        reason: "Recent bearish liquidity sweep is present.",
-        level:
-          finite(latest.price)
-            ? levels.find(
-                (level) =>
-                  Math.abs(level.price - latest.price!) <
-                  Math.abs(level.price) * 0.001
-              ) ?? null
-            : null,
-      };
-    }
-  }
-
   /*
-   * First-pass deterministic fallback:
-   * A sweep is not declared from the current price alone.
-   * The engine therefore treats the presence of a dedicated
-   * sweep event as authoritative and otherwise leaves this
-   * confirmation missing.
+   * LiquidityAnalysis currently maps liquidity pools
+   * but does not expose a dedicated sweep event.
+   *
+   * Do not infer a sweep from current price alone.
+   * A sweep detector will be added to liquidity.ts and
+   * consumed here later.
    */
   void currentPrice;
+  void liquidity;
 
   return {
     bullish: false,
@@ -316,11 +272,8 @@ function determineDirection(
   displacement: DisplacementAnalysis,
   confluence: ConfluenceAnalysis
 ): ValidatorDirection {
-  const structureBias = String(
-    (structure as StructureAnalysis & {
-      bias?: string;
-    }).bias ?? ""
-  ).toUpperCase();
+  const structureBias =
+    structure.bias;
 
   if (
     structureBias === "BULLISH" &&
@@ -337,18 +290,24 @@ function determineDirection(
   }
 
   const latestDisplacement =
-    getLatestDisplacement(displacement);
+    getLatestDisplacement(
+      displacement
+    );
 
   if (
-    latestDisplacement?.direction === "BULLISH" &&
-    confluence.direction !== "BEARISH"
+    latestDisplacement?.direction ===
+      "BULLISH" &&
+    confluence.direction !==
+      "BEARISH"
   ) {
     return "BULLISH";
   }
 
   if (
-    latestDisplacement?.direction === "BEARISH" &&
-    confluence.direction !== "BULLISH"
+    latestDisplacement?.direction ===
+      "BEARISH" &&
+    confluence.direction !==
+      "BULLISH"
   ) {
     return "BEARISH";
   }
@@ -361,24 +320,22 @@ function determineDirection(
     return "BEARISH";
   }
 
-  return confluence.direction === "BULLISH"
-    ? "BULLISH"
-    : confluence.direction === "BEARISH"
-      ? "BEARISH"
-      : "NEUTRAL";
+  return confluence.direction;
 }
 
 function hasStructureShift(
   structure: StructureAnalysis,
   direction: ValidatorDirection
 ): boolean {
-  const event = getLatestEvent(structure);
+  const event =
+    getLatestEvent(structure);
 
   if (!event) {
     return false;
   }
 
-  const eventType = String(event.type).toUpperCase();
+  const eventType =
+    String(event.type).toUpperCase();
 
   if (
     eventType !== "MSS" &&
@@ -388,29 +345,27 @@ function hasStructureShift(
     return false;
   }
 
-  const eventDirection = String(
-    event.direction ?? ""
-  ).toUpperCase();
-
-  return direction === "BULLISH"
-    ? eventDirection === "BULLISH"
-    : direction === "BEARISH"
-      ? eventDirection === "BEARISH"
-      : false;
+  return (
+    event.direction === direction
+  );
 }
 
 function hasDirectionalDisplacement(
   displacement: DisplacementAnalysis,
   direction: ValidatorDirection
 ): boolean {
-  const latest = getLatestDisplacement(displacement);
+  const latest =
+    getLatestDisplacement(
+      displacement
+    );
 
   if (!latest) {
     return false;
   }
 
   return (
-    latest.direction === direction &&
+    latest.direction ===
+      direction &&
     latest.strength !== "WEAK"
   );
 }
@@ -426,64 +381,72 @@ function hasDirectionalImbalance(
     return false;
   }
 
-  const fvgs = getActiveFVGs(fvg);
-  const blocks = getActiveOrderBlocks(orderBlocks);
-
-  const fvgMatch = fvgs.some((zone) => {
-    const zoneDirection =
-      zone.type === "BULLISH"
-        ? "BULLISH"
-        : "BEARISH";
-
-    const inside =
-      currentPrice >= zone.low &&
-      currentPrice <= zone.high;
-
-    const near =
-      isNearPrice(
-        currentPrice,
-        zone.low,
-        tolerancePercent
-      ) ||
-      isNearPrice(
-        currentPrice,
-        zone.high,
-        tolerancePercent
-      );
-
-    return (
-      zoneDirection === direction &&
-      (inside || near)
+  const fvgs =
+    getActiveFVGs(fvg);
+  const blocks =
+    getActiveOrderBlocks(
+      orderBlocks
     );
-  });
 
-  const blockMatch = blocks.some((block) => {
-    const blockDirection =
-      block.type === "BULLISH"
-        ? "BULLISH"
-        : "BEARISH";
+  const fvgMatch =
+    fvgs.some((zone) => {
+      const zoneDirection =
+        zone.type === "BULLISH"
+          ? "BULLISH"
+          : "BEARISH";
 
-    const inside =
-      currentPrice >= block.low &&
-      currentPrice <= block.high;
+      const inside =
+        currentPrice >= zone.low &&
+        currentPrice <= zone.high;
 
-    const near =
-      isNearPrice(
-        currentPrice,
-        block.low,
-        tolerancePercent
-      ) ||
-      isNearPrice(
-        currentPrice,
-        block.high,
-        tolerancePercent
+      const near =
+        isNearPrice(
+          currentPrice,
+          zone.low,
+          tolerancePercent
+        ) ||
+        isNearPrice(
+          currentPrice,
+          zone.high,
+          tolerancePercent
+        );
+
+      return (
+        zoneDirection ===
+          direction &&
+        (inside || near)
       );
+    });
 
-    return (
-      blockDirection === direction &&
-      (inside || near)
-    );
-  });
+  const blockMatch =
+    blocks.some((block) => {
+      const blockDirection =
+        block.type === "BULLISH"
+          ? "BULLISH"
+          : "BEARISH";
+
+      const inside =
+        currentPrice >= block.low &&
+        currentPrice <= block.high;
+
+      const near =
+        isNearPrice(
+          currentPrice,
+          block.low,
+          tolerancePercent
+        ) ||
+        isNearPrice(
+          currentPrice,
+          block.high,
+          tolerancePercent
+        );
+
+      return (
+        blockDirection ===
+          direction &&
+        (inside || near)
+      );
+    });
 
   return fvgMatch || blockMatch;
 }
@@ -492,16 +455,18 @@ function hasPremiumDiscountAlignment(
   premiumDiscount: PremiumDiscountAnalysis,
   direction: ValidatorDirection
 ): boolean {
-  const zone = String(
-    premiumDiscount.marketZone ?? ""
-  ).toUpperCase();
-
   if (direction === "BULLISH") {
-    return zone === "DISCOUNT";
+    return (
+      premiumDiscount.currentZone ===
+      "DISCOUNT"
+    );
   }
 
   if (direction === "BEARISH") {
-    return zone === "PREMIUM";
+    return (
+      premiumDiscount.currentZone ===
+      "PREMIUM"
+    );
   }
 
   return false;
@@ -511,28 +476,25 @@ function hasMTFConfluence(
   confluence: ConfluenceAnalysis,
   direction: ValidatorDirection
 ): boolean {
-  if (direction === "NEUTRAL") {
+  if (
+    direction === "NEUTRAL" ||
+    confluence.direction !== direction
+  ) {
     return false;
   }
 
-  if (confluence.direction !== direction) {
-    return false;
-  }
-
-  const timeframes = Array.isArray(
-    confluence.timeframeConfluence
-  )
-    ? confluence.timeframeConfluence
-    : [];
+  const timeframes =
+    confluence.timeframeConfluence ?? [];
 
   if (!timeframes.length) {
     return false;
   }
 
-  const aligned = timeframes.filter(
-    (timeframe) =>
-      timeframe.bias === direction
-  ).length;
+  const aligned =
+    timeframes.filter(
+      (timeframe) =>
+        timeframe.bias === direction
+    ).length;
 
   return aligned >= 2;
 }
@@ -560,34 +522,70 @@ function calculateTradeLevels(
     };
   }
 
-  const activeFVGs = getActiveFVGs(fvg);
+  const activeFVGs =
+    getActiveFVGs(fvg);
   const activeBlocks =
-    getActiveOrderBlocks(orderBlocks);
+    getActiveOrderBlocks(
+      orderBlocks
+    );
+
+  const levels =
+    getAllLiquidityLevels(
+      liquidity
+    );
 
   let entry = currentPrice;
-  let stopLoss: number | null = null;
+  let stopLoss:
+    | number
+    | null = null;
 
   if (direction === "BULLISH") {
-    const bullishFVG = activeFVGs
-      .filter((zone) => zone.type === "BULLISH")
-      .sort(
-        (a, b) =>
-          Math.abs(currentPrice - a.midpoint) -
-          Math.abs(currentPrice - b.midpoint)
-      )[0];
+    const bullishFVG =
+      activeFVGs
+        .filter(
+          (zone) =>
+            zone.type === "BULLISH"
+        )
+        .sort(
+          (a, b) =>
+            Math.abs(
+              currentPrice -
+                zoneMidpoint(a)
+            ) -
+            Math.abs(
+              currentPrice -
+                zoneMidpoint(b)
+            )
+        )[0];
 
-    const bullishOB = activeBlocks
-      .filter((block) => block.type === "BULLISH")
-      .sort(
-        (a, b) =>
-          Math.abs(currentPrice - a.midpoint) -
-          Math.abs(currentPrice - b.midpoint)
-      )[0];
+    const bullishOB =
+      activeBlocks
+        .filter(
+          (block) =>
+            block.type === "BULLISH"
+        )
+        .sort(
+          (a, b) =>
+            Math.abs(
+              currentPrice -
+                zoneMidpoint(a)
+            ) -
+            Math.abs(
+              currentPrice -
+                zoneMidpoint(b)
+            )
+        )[0];
 
     if (bullishFVG) {
-      entry = bullishFVG.midpoint;
+      entry =
+        zoneMidpoint(
+          bullishFVG
+        );
     } else if (bullishOB) {
-      entry = bullishOB.midpoint;
+      entry =
+        zoneMidpoint(
+          bullishOB
+        );
     }
 
     const structuralLow =
@@ -598,35 +596,46 @@ function calculateTradeLevels(
     if (finite(structuralLow)) {
       stopLoss =
         structuralLow *
-        (1 - options.stopBufferPercent / 100);
+        (1 -
+          options.stopBufferPercent /
+            100);
     }
 
-    const target1 = getNearestLiquidity(
-      liquidity.levels,
-      entry,
-      "ABOVE"
-    );
+    const target1 =
+      getNearestLiquidity(
+        levels,
+        entry,
+        "ABOVE"
+      );
 
     const target2Candidates =
-      liquidity.levels
-        .filter((level) => level.price > entry)
-        .sort((a, b) => a.price - b.price);
+      levels
+        .filter(
+          (level) =>
+            level.price > entry
+        )
+        .sort(
+          (a, b) =>
+            a.price - b.price
+        );
 
     const tp1 =
-      target1?.price ??
-      null;
+      target1?.price ?? null;
 
     const tp2 =
-      target2Candidates[1]?.price ??
-      null;
+      target2Candidates[1]
+        ?.price ?? null;
 
     const range =
       premiumDiscount.dealingRange;
 
     const tp3 =
-      finite(range?.high) && range.high > entry
-        ? range.high
-        : target2Candidates[2]?.price ?? null;
+      finite(range?.high) &&
+      range!.high > entry
+        ? range!.high
+        : target2Candidates[2]
+            ?.price ??
+          null;
 
     return finalizeLevels(
       entry,
@@ -639,26 +648,52 @@ function calculateTradeLevels(
     );
   }
 
-  const bearishFVG = activeFVGs
-    .filter((zone) => zone.type === "BEARISH")
-    .sort(
-      (a, b) =>
-        Math.abs(currentPrice - a.midpoint) -
-        Math.abs(currentPrice - b.midpoint)
-    )[0];
+  const bearishFVG =
+    activeFVGs
+      .filter(
+        (zone) =>
+          zone.type === "BEARISH"
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(
+            currentPrice -
+              zoneMidpoint(a)
+          ) -
+          Math.abs(
+            currentPrice -
+              zoneMidpoint(b)
+          )
+      )[0];
 
-  const bearishOB = activeBlocks
-    .filter((block) => block.type === "BEARISH")
-    .sort(
-      (a, b) =>
-        Math.abs(currentPrice - a.midpoint) -
-        Math.abs(currentPrice - b.midpoint)
-    )[0];
+  const bearishOB =
+    activeBlocks
+      .filter(
+        (block) =>
+          block.type === "BEARISH"
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(
+            currentPrice -
+              zoneMidpoint(a)
+          ) -
+          Math.abs(
+            currentPrice -
+              zoneMidpoint(b)
+          )
+      )[0];
 
   if (bearishFVG) {
-    entry = bearishFVG.midpoint;
+    entry =
+      zoneMidpoint(
+        bearishFVG
+      );
   } else if (bearishOB) {
-    entry = bearishOB.midpoint;
+    entry =
+      zoneMidpoint(
+        bearishOB
+      );
   }
 
   const structuralHigh =
@@ -669,35 +704,46 @@ function calculateTradeLevels(
   if (finite(structuralHigh)) {
     stopLoss =
       structuralHigh *
-      (1 + options.stopBufferPercent / 100);
+      (1 +
+        options.stopBufferPercent /
+          100);
   }
 
-  const target1 = getNearestLiquidity(
-    liquidity.levels,
-    entry,
-    "BELOW"
-  );
+  const target1 =
+    getNearestLiquidity(
+      levels,
+      entry,
+      "BELOW"
+    );
 
   const target2Candidates =
-    liquidity.levels
-      .filter((level) => level.price < entry)
-      .sort((a, b) => b.price - a.price);
+    levels
+      .filter(
+        (level) =>
+          level.price < entry
+      )
+      .sort(
+        (a, b) =>
+          b.price - a.price
+      );
 
   const tp1 =
-    target1?.price ??
-    null;
+    target1?.price ?? null;
 
   const tp2 =
-    target2Candidates[1]?.price ??
-    null;
+    target2Candidates[1]
+      ?.price ?? null;
 
   const range =
     premiumDiscount.dealingRange;
 
   const tp3 =
-    finite(range?.low) && range.low < entry
-      ? range.low
-      : target2Candidates[2]?.price ?? null;
+    finite(range?.low) &&
+    range!.low < entry
+      ? range!.low
+      : target2Candidates[2]
+          ?.price ??
+        null;
 
   return finalizeLevels(
     entry,
@@ -725,11 +771,21 @@ function finalizeLevels(
     !finite(tp1)
   ) {
     return {
-      entry: finite(entry) ? entry : null,
-      stopLoss: finite(stopLoss) ? stopLoss : null,
-      takeProfit1: finite(tp1) ? tp1 : null,
-      takeProfit2: finite(tp2) ? tp2 : null,
-      takeProfit3: finite(tp3) ? tp3 : null,
+      entry: finite(entry)
+        ? entry
+        : null,
+      stopLoss: finite(stopLoss)
+        ? stopLoss
+        : null,
+      takeProfit1: finite(tp1)
+        ? tp1
+        : null,
+      takeProfit2: finite(tp2)
+        ? tp2
+        : null,
+      takeProfit3: finite(tp3)
+        ? tp3
+        : null,
       riskReward: null,
     };
   }
@@ -744,7 +800,10 @@ function finalizeLevels(
       ? tp1 - entry
       : entry - tp1;
 
-  if (risk <= 0 || reward <= 0) {
+  if (
+    risk <= 0 ||
+    reward <= 0
+  ) {
     return {
       entry,
       stopLoss,
@@ -759,31 +818,19 @@ function finalizeLevels(
   let finalTP2 = tp2;
   let finalTP3 = tp3;
 
-  if (reward / risk < minimumRiskReward) {
-    const requiredTarget =
-      direction === "BULLISH"
-        ? entry + risk * minimumRiskReward
-        : entry - risk * minimumRiskReward;
-
-    finalTP1 = requiredTarget;
-
-    if (
-      !finite(finalTP2) ||
-      (direction === "BULLISH"
-        ? finalTP2 < requiredTarget
-        : finalTP2 > requiredTarget)
-    ) {
-      finalTP2 = requiredTarget;
-    }
-
-    if (
-      !finite(finalTP3) ||
-      (direction === "BULLISH"
-        ? finalTP3 < requiredTarget
-        : finalTP3 > requiredTarget)
-    ) {
-      finalTP3 = requiredTarget;
-    }
+  if (
+    reward / risk <
+    minimumRiskReward
+  ) {
+    /*
+     * Do not manufacture a valid trade by moving TP
+     * to an arbitrary price. The target must be backed
+     * by actual market/liquidity structure.
+     *
+     * Leave the existing targets untouched and let the
+     * final R:R gate reject the setup if it is below 1:3.5.
+     */
+    void minimumRiskReward;
   }
 
   const finalReward =
@@ -798,7 +845,8 @@ function finalizeLevels(
     takeProfit2: finalTP2,
     takeProfit3: finalTP3,
     riskReward:
-      risk > 0 && finalReward > 0
+      risk > 0 &&
+      finalReward > 0
         ? finalReward / risk
         : null,
   };
@@ -815,18 +863,21 @@ export function validateEntry(
   confluence: ConfluenceAnalysis,
   options: ValidatorOptions = {}
 ): EntryValidationResult {
-  const config = mergeOptions(options);
+  const config =
+    mergeOptions(options);
 
-  const direction = determineDirection(
-    structure,
-    displacement,
-    confluence
-  );
+  const direction =
+    determineDirection(
+      structure,
+      displacement,
+      confluence
+    );
 
-  const sweep = detectLiquiditySweep(
-    currentPrice,
-    liquidity
-  );
+  const sweep =
+    detectLiquiditySweep(
+      currentPrice,
+      liquidity
+    );
 
   const structureShift =
     hasStructureShift(
@@ -861,146 +912,192 @@ export function validateEntry(
       direction
     );
 
-  const steps: ValidationStep[] = [
-    {
-      name: "LIQUIDITY SWEEP",
-      status:
-        direction === "BULLISH"
-          ? sweep.bullish
-            ? "CONFIRMED"
-            : "MISSING"
-          : direction === "BEARISH"
-            ? sweep.bearish
+  const steps:
+    ValidationStep[] = [
+      {
+        name:
+          "LIQUIDITY SWEEP",
+        status:
+          direction ===
+          "BULLISH"
+            ? sweep.bullish
               ? "CONFIRMED"
               : "MISSING"
+            : direction ===
+                "BEARISH"
+              ? sweep.bearish
+                ? "CONFIRMED"
+                : "MISSING"
+              : "MISSING",
+        passed:
+          direction ===
+          "BULLISH"
+            ? sweep.bullish
+            : direction ===
+                "BEARISH"
+              ? sweep.bearish
+              : false,
+        reason:
+          sweep.reason,
+      },
+      {
+        name:
+          "DISPLACEMENT",
+        status:
+          directionalDisplacement
+            ? "CONFIRMED"
             : "MISSING",
-      passed:
-        direction === "BULLISH"
-          ? sweep.bullish
-          : direction === "BEARISH"
-            ? sweep.bearish
-            : false,
-      reason: sweep.reason,
-    },
-    {
-      name: "DISPLACEMENT",
-      status: directionalDisplacement
-        ? "CONFIRMED"
-        : "MISSING",
-      passed: directionalDisplacement,
-      reason: directionalDisplacement
-        ? `Directional ${direction.toLowerCase()} displacement confirmed.`
-        : "No strong directional displacement is confirmed.",
-    },
-    {
-      name: "MSS / CHoCH / BOS",
-      status: structureShift
-        ? "CONFIRMED"
-        : "MISSING",
-      passed: structureShift,
-      reason: structureShift
-        ? "Directional structure break/shift confirmed."
-        : "No confirmed directional structure shift is available.",
-    },
-    {
-      name: "FVG / ORDER BLOCK",
-      status: imbalance
-        ? "CONFIRMED"
-        : "MISSING",
-      passed: imbalance,
-      reason: imbalance
-        ? "Directional imbalance or order block is near price."
-        : "No usable directional FVG/order block is near current price.",
-    },
-    {
-      name: "PREMIUM / DISCOUNT",
-      status: pdAlignment
-        ? "CONFIRMED"
-        : "MISSING",
-      passed: pdAlignment,
-      reason: pdAlignment
-        ? `Price is in ${direction === "BULLISH" ? "discount" : "premium"} for the selected dealing range.`
-        : "Premium/discount location does not align with the proposed direction.",
-    },
-    {
-      name: "MULTI-TIMEFRAME CONFLUENCE",
-      status: mtfAlignment
-        ? "CONFIRMED"
-        : "MISSING",
-      passed: mtfAlignment,
-      reason: mtfAlignment
-        ? "At least two analyzed timeframes align with the proposed direction."
-        : "Multi-timeframe directional alignment is insufficient.",
-    },
-  ];
+        passed:
+          directionalDisplacement,
+        reason:
+          directionalDisplacement
+            ? `Directional ${direction.toLowerCase()} displacement confirmed.`
+            : "No strong directional displacement is confirmed.",
+      },
+      {
+        name:
+          "MSS / CHoCH / BOS",
+        status:
+          structureShift
+            ? "CONFIRMED"
+            : "MISSING",
+        passed:
+          structureShift,
+        reason:
+          structureShift
+            ? "Directional structure break/shift confirmed."
+            : "No confirmed directional structure shift is available.",
+      },
+      {
+        name:
+          "FVG / ORDER BLOCK",
+        status:
+          imbalance
+            ? "CONFIRMED"
+            : "MISSING",
+        passed:
+          imbalance,
+        reason:
+          imbalance
+            ? "Directional imbalance or order block is near price."
+            : "No usable directional FVG/order block is near current price.",
+      },
+      {
+        name:
+          "PREMIUM / DISCOUNT",
+        status:
+          pdAlignment
+            ? "CONFIRMED"
+            : "MISSING",
+        passed:
+          pdAlignment,
+        reason:
+          pdAlignment
+            ? `Price is in ${direction === "BULLISH" ? "discount" : "premium"} for the selected dealing range.`
+            : "Premium/discount location does not align with the proposed direction.",
+      },
+      {
+        name:
+          "MULTI-TIMEFRAME CONFLUENCE",
+        status:
+          mtfAlignment
+            ? "CONFIRMED"
+            : "MISSING",
+        passed:
+          mtfAlignment,
+        reason:
+          mtfAlignment
+            ? "At least two analyzed timeframes align with the proposed direction."
+            : "Multi-timeframe directional alignment is insufficient.",
+      },
+    ];
 
-  const requiredSteps = steps.filter((step) => {
-    if (
-      step.name === "LIQUIDITY SWEEP" &&
-      !config.requireLiquiditySweep
-    ) {
-      return false;
-    }
+  const requiredSteps =
+    steps.filter((step) => {
+      if (
+        step.name ===
+          "LIQUIDITY SWEEP" &&
+        !config.requireLiquiditySweep
+      ) {
+        return false;
+      }
 
-    if (
-      step.name === "DISPLACEMENT" &&
-      !config.requireDisplacement
-    ) {
-      return false;
-    }
+      if (
+        step.name ===
+          "DISPLACEMENT" &&
+        !config.requireDisplacement
+      ) {
+        return false;
+      }
 
-    if (
-      step.name === "MSS / CHoCH / BOS" &&
-      !config.requireStructureShift
-    ) {
-      return false;
-    }
+      if (
+        step.name ===
+          "MSS / CHoCH / BOS" &&
+        !config.requireStructureShift
+      ) {
+        return false;
+      }
 
-    if (
-      step.name === "FVG / ORDER BLOCK" &&
-      !config.requireImbalance
-    ) {
-      return false;
-    }
+      if (
+        step.name ===
+          "FVG / ORDER BLOCK" &&
+        !config.requireImbalance
+      ) {
+        return false;
+      }
 
-    if (
-      step.name === "PREMIUM / DISCOUNT" &&
-      !config.requirePremiumDiscountAlignment
-    ) {
-      return false;
-    }
+      if (
+        step.name ===
+          "PREMIUM / DISCOUNT" &&
+        !config.requirePremiumDiscountAlignment
+      ) {
+        return false;
+      }
 
-    if (
-      step.name === "MULTI-TIMEFRAME CONFLUENCE" &&
-      !config.requireMultiTimeframeConfluence
-    ) {
-      return false;
-    }
+      if (
+        step.name ===
+          "MULTI-TIMEFRAME CONFLUENCE" &&
+        !config.requireMultiTimeframeConfluence
+      ) {
+        return false;
+      }
 
-    return true;
-  });
+      return true;
+    });
 
-  const passedCount = requiredSteps.filter(
-    (step) => step.passed
-  ).length;
+  const passedCount =
+    requiredSteps.filter(
+      (step) => step.passed
+    ).length;
 
   const missingConfirmations =
     requiredSteps
-      .filter((step) => !step.passed)
-      .map((step) => step.name);
+      .filter(
+        (step) => !step.passed
+      )
+      .map(
+        (step) => step.name
+      );
 
-  const reasons = requiredSteps
-    .filter((step) => !step.passed)
-    .map((step) => step.reason);
+  const reasons =
+    requiredSteps
+      .filter(
+        (step) => !step.passed
+      )
+      .map(
+        (step) => step.reason
+      );
 
   if (
     direction === "NEUTRAL" ||
-    passedCount < config.minimumConfirmations ||
+    passedCount <
+      config.minimumConfirmations ||
     missingConfirmations.length > 0
   ) {
     return {
       valid: false,
-      action: "NO VALID ENTRY YET — WAIT.",
+      action:
+        "NO VALID ENTRY YET — WAIT.",
       direction,
       status: "MISSING",
       steps,
@@ -1015,35 +1112,46 @@ export function validateEntry(
       levels: {
         entry: null,
         stopLoss: null,
-        takeProfit1: null,
-        takeProfit2: null,
-        takeProfit3: null,
+        takeProfit1:
+          null,
+        takeProfit2:
+          null,
+        takeProfit3:
+          null,
         riskReward: null,
       },
-      generatedAt: new Date().toISOString(),
+      generatedAt:
+        new Date().toISOString(),
     };
   }
 
-  const levels = calculateTradeLevels(
-    currentPrice,
-    direction,
-    liquidity,
-    fvg,
-    orderBlocks,
-    premiumDiscount,
-    config
-  );
+  const levels =
+    calculateTradeLevels(
+      currentPrice,
+      direction,
+      liquidity,
+      fvg,
+      orderBlocks,
+      premiumDiscount,
+      config
+    );
 
   if (
     !finite(levels.entry) ||
     !finite(levels.stopLoss) ||
-    !finite(levels.takeProfit1) ||
-    !finite(levels.riskReward) ||
-    levels.riskReward < config.minimumRiskReward
+    !finite(
+      levels.takeProfit1
+    ) ||
+    !finite(
+      levels.riskReward
+    ) ||
+    levels.riskReward <
+      config.minimumRiskReward
   ) {
     return {
       valid: false,
-      action: "NO VALID ENTRY YET — WAIT.",
+      action:
+        "NO VALID ENTRY YET — WAIT.",
       direction,
       status: "PARTIAL",
       steps,
@@ -1058,7 +1166,8 @@ export function validateEntry(
           ? "Close below the structural stop/invalidation level."
           : "Close above the structural stop/invalidation level.",
       levels,
-      generatedAt: new Date().toISOString(),
+      generatedAt:
+        new Date().toISOString(),
     };
   }
 
@@ -1083,6 +1192,7 @@ export function validateEntry(
         ? `Invalid if price closes below ${levels.stopLoss!.toFixed(2)}.`
         : `Invalid if price closes above ${levels.stopLoss!.toFixed(2)}.`,
     levels,
-    generatedAt: new Date().toISOString(),
+    generatedAt:
+      new Date().toISOString(),
   };
 }
